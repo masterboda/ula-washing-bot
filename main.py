@@ -1,4 +1,5 @@
 import re
+import json
 import datetime
 import threading
 
@@ -12,11 +13,9 @@ from telegram.ext import (
     Filters
 )
 
-from .config import TOKEN
-from .commands import (
-    start,
-    help
-)
+from src.config import TOKEN
+from src.db import init_db
+from src.handlers import conversation_handler
 
 """ Logging setup
 ========================================="""
@@ -36,19 +35,24 @@ def shutdown():
 
 
 def stop(update: telegram.Update, context: CallbackContext):
-    context.bot.send_message(update.effective_chat.id, "Bot is going to stop. Bye!")
-    threading.Thread(target=shutdown).start()
+    if update.effective_user.username == 'masterboda':
+        update.message.reply_text("Bot is going to stop. Bye!")
+        threading.Thread(target=shutdown).start()
+    else:
+        update.message.reply_text("You don't have a permission to do this operation!")
 
 
 def main():
+    # Conversation Handlers
+    updater.dispatcher.add_handler(conversation_handler)
+
     # Command Handlers
     updater.dispatcher.add_handler(CommandHandler('stop', stop))
-    updater.dispatcher.add_handler(CommandHandler('start', start))
-    updater.dispatcher.add_handler(CommandHandler('help', help))
 
     # Message Handlers
     # ...
 
+    init_db(True)
     updater.start_polling()
 
 
