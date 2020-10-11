@@ -78,7 +78,7 @@ def init_db(cursor, reset=False):
         """
         CREATE TABLE IF NOT EXISTS queues (
             id INT AUTO_INCREMENT PRIMARY KEY,
-            is_finished BOOl 0
+            is_finished BOOL DEFAULT 0
         )
         """
     )
@@ -90,9 +90,9 @@ def init_db(cursor, reset=False):
             queue_id INT NOT NULL,
             user TEXT NOT NULL,
             date datetime NOT NULL,
-            order INT NOT NULL,
-            is_washing BOOL 0,
-            is_finished BOOL 0,
+            sequence_number INT NOT NULL,
+            is_washing BOOL DEFAULT 0,
+            is_finished BOOL DEFAULT 0,
             wash_start_time datetime
         )
         """
