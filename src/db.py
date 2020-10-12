@@ -1,13 +1,17 @@
 import sqlite3
+import sys
 import json
+import time
 
 
 class SQLite:
     def __init__(self):
-        self.db_file = 'data.db'
+        self.db_file = '/home/brutia/Code/Work/ula-washing-bot/data.db'
 
     def __enter__(self):
         self.conn = sqlite3.connect(self.db_file)
+        self.conn.row_factory = sqlite3.Row
+
         return self.conn.cursor()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -19,40 +23,114 @@ def with_db(func):
 
     def wrapper(*args, **kwargs):
         with SQLite() as cursor:
+            # try:
             return func(cursor, *args, **kwargs)
+            # except Exception as e:
+            #     print('DATABASE ERROR', e)
 
     return wrapper
 
 
 @with_db
+def get_data(cursor):
+    cursor.execute('SELECT * FROM data LIMIT 1')
+    data = cursor.fetchone()
+    return data
+
+
+@with_db
 def get_active_queue(cursor):
-    cursor.execute('SELECT id FROM queues WHERE id = (SELECT active_queue FROM data LIMIT 1)')
-    queue_id = cursor.fetchone()[0]
+    queue_id = get_data()['active_queue_id']
 
-    cursor.execute('SELECT * FROM queue_item WHERE queue_id = ?', queue_id)
-    queue_items = cursor.fetchone()
+    if queue_id:
+        cursor.execute('SELECT * FROM queues WHERE id = ?', (queue_id,))
+        queue = cursor.fetchone()
 
-    return queue_id, queue_items
+        return queue
+
+    return None
 
 
 @with_db
 def set_active_queue(cursor, queue_id):
-    cursor.execute('UPDATE data SET active_queue = ?', queue_id)
+    print('set ID: ', type(queue_id))
+    cursor.execute('UPDATE data SET active_queue_id = ?', (queue_id,))
 
 
 @with_db
-def create_queue(cursor, data, is_active=False):
-    cursor.execute('INSERT INTO queues (data) VALUES (?)', json.dumps(data))
+def create_queue(cursor, is_active=False):
+    cursor.execute('INSERT INTO queues DEFAULT VALUES')
 
     if is_active:
-        set_active_queue(cursor.lastrowid)
+        cursor.execute('UPDATE data SET active_queue_id = ?', (cursor.lastrowid,))
 
     return cursor.lastrowid
 
 
 @with_db
-def update_queue(cursor, new_data, queue_id):
-    cursor.execute('UPDATE queues SET data = ? WHERE id = ?', new_data, queue_id)
+def add_queue_item(cursor, queue_id, user):
+    cursor.execute('SELECT queue FROM queues WHERE id = ?', (queue_id,))
+    queue = json.loads(cursor.fetchone()['queue'] or '[]')
+
+    if len([*filter(lambda item: item['user_data']['user_id'] == user.id, queue)]) > 0:
+        return
+
+    data = {
+        'user_data': {
+            'user_id': user.id,
+            'username': user.username,
+            'first_name': user.first_name,
+            'last_name': user.last_name
+        },
+        'date': time.time(),
+        'is_washing': False,
+        'wash_start_time': None,
+        'is_finished': False
+    }
+    queue.append(data)
+
+    cursor.execute('UPDATE queues SET queue = ? WHERE id = ?', (json.dumps(queue), queue_id))
+
+
+@with_db
+def remove_queue_item(cursor, queue_id, user):
+    cursor.execute('SELECT queue FROM queues WHERE id = ?', (queue_id,))
+    queue = cursor.fetchone()['queue']
+
+    if not queue:
+        return
+
+    queue = [*filter(lambda item: item['user_data']['user_id'] != user.id, json.loads(queue))]
+    cursor.execute('UPDATE queues SET queue = ? WHERE id = ?', (json.dumps(queue), queue_id))
+
+
+@with_db
+def swap_queue_items(cursor, queue_id, user):
+    """ Returns id of user to notify """
+
+    cursor.execute('SELECT queue FROM queues WHERE id = ?', (queue_id,))
+    queue = cursor.fetchone()['queue']
+
+    if not queue:
+        return
+
+    queue = json.loads(queue)
+
+    position = None
+    for i, item in enumerate(queue):
+        if item['user_data']['user_id'] == user.id:
+            position = i
+            break
+
+    if position is None or position == (len(queue) - 1):
+        return
+
+    item = queue.pop(position)
+    queue.insert(position + 1, item)
+
+    cursor.execute('UPDATE queues SET queue = ? WHERE id = ?', (json.dumps(queue), queue_id))
+
+    return queue[position]['user_data']['user_id']
 
 
 @with_db
@@ -61,23 +139,25 @@ def init_db(cursor, reset=False):
     if reset:
         cursor.execute('DROP TABLE IF EXISTS data')
         cursor.execute('DROP TABLE IF EXISTS queues')
-        cursor.execute('DROP TABLE IF EXISTS queue_item')
         cursor.execute('DROP TABLE IF EXISTS timetables')
 
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS data (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            active_queue INT NULL,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            active_queue_id INT NULL,
             active_timetable INT NULL
         )
         """
     )
+    cursor.execute('INSERT INTO data DEFAULT VALUES ')
 
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS queues (
-            id INT AUTO_INCREMENT PRIMARY KEY,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            queue TEXT,
+            queue_length INT DEFAULT 0,
             is_finished BOOL DEFAULT 0
         )
         """
@@ -85,26 +165,10 @@ def init_db(cursor, reset=False):
 
     cursor.execute(
         """
-        CREATE TABLE IF NOT EXISTS queue_item (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            queue_id INT NOT NULL,
-            user TEXT NOT NULL,
-            date datetime NOT NULL,
-            sequence_number INT NOT NULL,
-            is_washing BOOL DEFAULT 0,
-            is_finished BOOL DEFAULT 0,
-            wash_start_time datetime
-        )
-        """
-    )
-
-    cursor.execute(
-        """
         CREATE TABLE IF NOT EXISTS timetables (
-            id INT AUTO_INCREMENT PRIMARY KEY,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             rows TEXT
         )
         """
     )
-

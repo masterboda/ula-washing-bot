@@ -2,7 +2,6 @@ import re
 import json
 import datetime
 import threading
-
 import telegram
 
 from telegram.ext import (
@@ -14,14 +13,20 @@ from telegram.ext import (
 )
 
 from src.config import TOKEN
-from src.db import init_db
 from src.handlers import conversation_handler
+
+from src.db import (
+    init_db,
+    get_data,
+    get_active_queue,
+    create_queue
+)
 
 """ Logging setup
 ========================================="""
 import logging
-logging.basicConfig(level=logging.DEBUG,
-                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# logging.basicConfig(level=logging.DEBUG,
+#                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 updater = Updater(token=TOKEN, use_context=True)
 
@@ -53,6 +58,11 @@ def main():
     # ...
 
     init_db(True)
+    print({**get_data()})
+
+    if not get_active_queue():
+        print(create_queue(is_active=True))
+
     updater.start_polling()
 
 
